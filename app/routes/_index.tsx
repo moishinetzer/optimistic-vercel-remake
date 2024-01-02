@@ -1,6 +1,13 @@
 // import { kv } from '@vercel/kv'
 // import { saveEmail } from './actions'
-import FeatureForm, { Feature } from "~/components/feature-form";
+import { ActionFunctionArgs, json } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
+import { kv } from "@vercel/kv";
+import {
+  type Feature,
+  FeatureList,
+  NewFeatureForm,
+} from "~/components/feature-form";
 
 // export let metadata = {
 //   title: 'Next.js and Redis Example',
@@ -28,40 +35,67 @@ function VercelLogo(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-// async function getFeatures() {
-//   let itemIds = await kv.zrange('items_by_score', 0, 100, {
-//     rev: true,
-//   })
+export async function action({ request }: ActionFunctionArgs) {
+  const formData = await request.formData();
+  const intent = formData.get("intent");
 
-//   if (!itemIds.length) {
-//     return []
-//   }
+  if (intent === "feature") {
+    const feature = formData.get("feature");
 
-//   let multi = kv.multi()
-//   itemIds.forEach((id) => {
-//     multi.hgetall(`item:${id}`)
-//   })
+    if (!feature) {
+      throw new Error("Missing feature");
+    }
 
-//   let items: Feature[] = await multi.exec()
-//   return items.map((item) => {
-//     return {
-//       ...item,
-//       score: item.score,
-//       created_at: item.created_at,
-//     }
-//   })
-// }
+    const id = Math.random().toString(36).slice(2);
+    const score = "0";
+    const created_at = new Date().toISOString();
+
+    await kv.hset(`item:${id}`, {
+      id,
+      title: feature,
+      score,
+      created_at,
+    });
+  } else if (intent === "upvote") {
+    const id = formData.get("id");
+
+    if (!id) {
+      throw new Error("Missing id");
+    }
+
+    const feature = await kv.hgetall<Feature>(`item:${id}`);
+
+    if (!feature) {
+      throw new Error("Feature not found");
+    }
+
+    await kv.hset(`item:${id}`, {
+      ...feature,
+      score: Number(feature.score) + 1,
+    });
+  }
+
+  return null;
+}
+
+export async function loader() {
+  // Get all features
+  const featureKeys = await kv.keys("item:*");
+
+  const features = await Promise.all(
+    featureKeys.map(async (key) => {
+      const feature = await kv.hgetall<Feature>(key);
+      return feature!;
+    })
+  );
+
+  return json({
+    features,
+  });
+}
 
 export default function Page() {
-  // let features = await getFeatures()
-  const features: Feature[] = [
-    {
-      created_at: "12 Jan 2023",
-      id: "123",
-      score: "12",
-      title: "ok",
-    },
-  ];
+  const { features } = useLoaderData<typeof loader>();
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen py-2">
@@ -76,17 +110,16 @@ export default function Page() {
           Create or vote up features you want to see in our product.
         </h2>
         <div className="flex flex-wrap items-center justify-around max-w-4xl my-8 sm:w-full bg-white rounded-md shadow-xl h-full border border-gray-100">
-          <FeatureForm features={features} />
+          <NewFeatureForm />
+          <FeatureList features={features} />
+
           <hr className="border-1 border-gray-200 my-8 mx-8 w-full" />
           <div className="mx-8 w-full">
             <p className="flex text-gray-500">
               Leave your email address here to be notified when feature requests
               are released.
             </p>
-            <form
-              className="relative my-4"
-              // action={saveEmail}
-            >
+            <form className="relative my-4">
               <input
                 name="email"
                 aria-label="Email for updates"
