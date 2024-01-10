@@ -135,7 +135,7 @@ function usePendingItems(): {
   const pendingUpvoteItems = fetchers
     .filter((fetcher) => {
       const intent = String(fetcher.formData?.get("intent"));
-      return intent === "upvote";
+      return intent === "upvote" && fetcher.state === "submitting";
     })
     .map((fetcher) => {
       const id = String(fetcher.formData?.get("id"));
