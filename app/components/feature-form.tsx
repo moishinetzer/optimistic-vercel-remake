@@ -10,7 +10,6 @@ export function NewFeatureForm() {
     <div className="mx-8 w-full">
       <Form
         navigate={false}
-        fetcherKey={id}
         method="POST"
         action="/?index"
         className="relative my-8"
@@ -29,12 +28,6 @@ export function NewFeatureForm() {
         />
         <input type="hidden" name="intent" value="feature" />
         <input type="hidden" name="id" value={id} />
-        <input type="hidden" name="score" value="0" />
-        <input
-          type="hidden"
-          name="created_at"
-          value={new Date().toISOString()}
-        />
         <button
           className={clsx(
             "flex items-center justify-center absolute right-2 top-2 px-4 h-10 text-lg border bg-black text-white rounded-md w-24 focus:outline-none focus:ring focus:ring-blue-300 focus:bg-gray-800"
@@ -95,7 +88,6 @@ export function Item({
       navigate={false}
       method="POST"
       action="/?index"
-      fetcherKey={feature.id}
       className={clsx(
         "p-6 mx-8 flex items-center border-t border-l border-r",
         isFirst && "rounded-t-md",
@@ -113,9 +105,6 @@ export function Item({
         👍
       </button>
       <input type="hidden" name="id" value={feature.id} />
-      <input type="hidden" name="title" value={feature.title} />
-      <input type="hidden" name="created_at" value={feature.created_at} />
-      <input type="hidden" name="score" value={feature.score} />
       <h3 className="text font-semibold w-full text-left">{feature.title}</h3>
 
       <button

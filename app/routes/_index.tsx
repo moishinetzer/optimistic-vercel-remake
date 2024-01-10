@@ -33,12 +33,12 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = formData.get("intent");
 
   if (intent === "feature" || intent === "upvote") {
-    const title = String(formData.get("title")!);
     const id = String(formData.get("id")!);
-    const created_at = formData.has("created_at")
-      ? String(formData.get("created_at"))
-      : new Date().toISOString();
-    const score = formData.has("score") ? Number(formData.get("score")) + 1 : 0;
+    if (!id) {
+      throw new Error("Missing id");
+    }
+
+    const title = String(formData.get("title"));
 
     await db.feature.upsert({
       where: {
@@ -47,14 +47,13 @@ export async function action({ request }: ActionFunctionArgs) {
       create: {
         id,
         title,
-        score,
-        created_at,
+        score: 0,
+        created_at: new Date(),
       },
       update: {
-        id,
-        title,
-        score,
-        created_at,
+        score: {
+          increment: 1,
+        },
       },
     });
   } else if (intent === "delete") {
@@ -82,38 +81,71 @@ export async function loader() {
   });
 }
 
+// Proposed optimistic model:
+
+// Create new feature -> FormData({
+//   intent: "feature",
+//   title: "My new feature",
+//   score: 0,
+//   id: "123",
+// })
+
+// Upvote feature that has been created -> FormData({
+//   intent: "upvote",
+//   id: "123",
+//   // Do not include the score, it will be incremented on the server
+// })
+
+// To see the current upvote count we can count the number of pending upvote fetchers
+// for a given feature id.
+// E.g. fetchers.filter(fetcher => fetcher.formData.get("id") === "123" && fetcher.formData.get("intent") === "upvote").length
+
+// Then on the client we add the pending upvote count to the feature score
+
 function usePendingItems(): {
-  pendingItems: Feature[];
-  deletedItems: {
+  pendingNewItems: Feature[];
+  pendingUpvoteItems: {
+    id: string;
+  }[];
+  pendingDeletedItems: {
     id: string;
   }[];
 } {
   const fetchers = useFetchers();
 
-  const pendingItems = fetchers
+  const pendingNewItems = fetchers
     .filter((fetcher) => {
       const intent = String(fetcher.formData?.get("intent"));
-      return intent === "feature" || intent === "upvote";
+      return intent === "feature";
     })
     .map((fetcher) => {
       const id = String(fetcher.formData?.get("id"));
       const title = String(fetcher.formData?.get("title"));
       const created_at = String(fetcher.formData?.get("created_at"));
 
-      const intent = String(fetcher.formData?.get("intent"));
-      const score =
-        intent === "feature" ? 0 : Number(fetcher.formData?.get("score")) + 1;
-
       return {
         id,
         title,
-        score,
         created_at,
-        intent,
+        // TODO: Remove score from the form data
+        score: 0,
       };
     });
 
-  const deletedItems = fetchers
+  const pendingUpvoteItems = fetchers
+    .filter((fetcher) => {
+      const intent = String(fetcher.formData?.get("intent"));
+      return intent === "upvote";
+    })
+    .map((fetcher) => {
+      const id = String(fetcher.formData?.get("id"));
+
+      return {
+        id,
+      };
+    });
+
+  const pendingDeletedItems = fetchers
     .filter((fetcher) => {
       const intent = String(fetcher.formData?.get("intent"));
       return intent === "delete";
@@ -127,8 +159,9 @@ function usePendingItems(): {
     });
 
   return {
-    pendingItems,
-    deletedItems,
+    pendingNewItems,
+    pendingUpvoteItems,
+    pendingDeletedItems,
   };
 }
 
@@ -137,24 +170,38 @@ export default function Page() {
 
   const featuresMap = new Map<string, Feature>();
 
-  // Add any pending new features to the list
-  const { pendingItems, deletedItems } = usePendingItems();
+  const { pendingDeletedItems, pendingNewItems, pendingUpvoteItems } =
+    usePendingItems();
 
-  // Add all existing features to the list as long as they aren't pending deletion
+  // First add all the existing features to the map so long as they don't have a pending delete
   for (const feature of features) {
-    if (!deletedItems.some((item) => item.id === feature.id)) {
-      featuresMap.set(feature.id, feature);
-    }
+    if (pendingDeletedItems.some((item) => item.id === feature.id)) continue;
+
+    const pendingUpvoteCount = pendingUpvoteItems.filter(
+      (item) => item.id === feature.id
+    ).length;
+
+    featuresMap.set(feature.id, {
+      ...feature,
+      score: feature.score + pendingUpvoteCount,
+    });
   }
 
-  // Add any pending new features to the list
-  for (const feature of pendingItems) {
-    if (!deletedItems.some((item) => item.id === feature.id)) {
-      featuresMap.set(feature.id, feature);
-    }
+  // Do the same for the pending new items - they might also have pending upvotes
+  for (const feature of pendingNewItems) {
+    const pendingUpvoteCount = pendingUpvoteItems.filter(
+      (item) => item.id === feature.id
+    ).length;
+
+    featuresMap.set(feature.id, {
+      ...feature,
+      score: feature.score + pendingUpvoteCount,
+    });
   }
 
   return (
+    // Markup for the page
+    // ...
     <div className="flex flex-col items-center justify-center min-h-screen py-2">
       <main className="flex flex-col items-center justify-center flex-1 px-4 sm:px-20 text-center">
         <div className="flex justify-center items-center bg-black rounded-full w-16 sm:w-24 h-16 sm:h-24 my-8">
