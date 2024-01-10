@@ -1,13 +1,21 @@
-import { useFetcher } from "@remix-run/react";
+import { Form } from "@remix-run/react";
 import clsx from "clsx";
+import { useState } from "react";
 
 export function NewFeatureForm() {
-  const fetcher = useFetcher();
-  const pending = fetcher.state !== "idle";
+  const [title, setTitle] = useState("");
+  const id = Math.random().toString(36).slice(2);
 
   return (
     <div className="mx-8 w-full">
-      <fetcher.Form method="POST" action="/?index" className="relative my-8">
+      <Form
+        navigate={false}
+        fetcherKey={id}
+        method="POST"
+        action="/?index"
+        className="relative my-8"
+        onSubmit={() => setTitle("")}
+      >
         <input
           aria-label="Suggest a feature for our roadmap"
           className="pl-3 pr-28 py-3 mt-1 text-lg block w-full border border-gray-200 rounded-md text-gray-900 placeholder-gray-400 focus:outline-none focus:ring focus:ring-blue-300"
@@ -15,21 +23,27 @@ export function NewFeatureForm() {
           placeholder="I want..."
           required
           type="text"
-          name="feature"
-          disabled={pending}
+          name="title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
         />
         <input type="hidden" name="intent" value="feature" />
+        <input type="hidden" name="id" value={id} />
+        <input type="hidden" name="score" value="0" />
+        <input
+          type="hidden"
+          name="created_at"
+          value={new Date().toISOString()}
+        />
         <button
           className={clsx(
-            "flex items-center justify-center absolute right-2 top-2 px-4 h-10 text-lg border bg-black text-white rounded-md w-24 focus:outline-none focus:ring focus:ring-blue-300 focus:bg-gray-800",
-            pending && "bg-gray-700 cursor-not-allowed"
+            "flex items-center justify-center absolute right-2 top-2 px-4 h-10 text-lg border bg-black text-white rounded-md w-24 focus:outline-none focus:ring focus:ring-blue-300 focus:bg-gray-800"
           )}
           type="submit"
-          disabled={pending}
         >
           Request
         </button>
-      </fetcher.Form>
+      </Form>
     </div>
   );
 }
@@ -37,15 +51,15 @@ export function NewFeatureForm() {
 export type Feature = {
   id: string;
   title: string;
-  score: string;
+  score: number;
   created_at: string;
 };
 
 export function FeatureList({ features }: { features: Feature[] }) {
   const sortedFeatures = features.sort((a, b) => {
     // First, compare by score in descending order
-    if (Number(a.score) > Number(b.score)) return -1;
-    if (Number(a.score) < Number(b.score)) return 1;
+    if (a.score > b.score) return -1;
+    if (a.score < b.score) return 1;
 
     // If scores are equal, then sort by created_at i n ascending order
     return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
@@ -67,7 +81,7 @@ export function FeatureList({ features }: { features: Feature[] }) {
   );
 }
 
-function Item({
+export function Item({
   isFirst,
   isLast,
   feature,
@@ -76,15 +90,12 @@ function Item({
   isLast: boolean;
   feature: Feature;
 }) {
-  const fetcher = useFetcher({
-    key: feature.id,
-  });
-  const pending = fetcher.state !== "idle";
-
   return (
-    <fetcher.Form
+    <Form
+      navigate={false}
       method="POST"
       action="/?index"
+      fetcherKey={feature.id}
       className={clsx(
         "p-6 mx-8 flex items-center border-t border-l border-r",
         isFirst && "rounded-t-md",
@@ -93,20 +104,28 @@ function Item({
     >
       <button
         className={clsx(
-          "ring-1 ring-gray-200 rounded-full w-8 min-w-[2rem] h-8 mr-4 focus:outline-none focus:ring focus:ring-blue-300",
-          pending && "bg-gray-100 cursor-not-allowed"
+          "ring-1 ring-gray-200 rounded-full w-8 min-w-[2rem] h-8 mr-4 focus:outline-none focus:ring focus:ring-blue-300"
         )}
-        disabled={pending}
         type="submit"
+        name="intent"
+        value="upvote"
       >
         👍
       </button>
-      <input type="hidden" name="intent" value="upvote" />
       <input type="hidden" name="id" value={feature.id} />
+      <input type="hidden" name="title" value={feature.title} />
+      <input type="hidden" name="created_at" value={feature.created_at} />
+      <input type="hidden" name="score" value={feature.score} />
       <h3 className="text font-semibold w-full text-left">{feature.title}</h3>
-      <div className="bg-gray-200 text-gray-700 text-sm rounded-xl px-2 ml-2">
+
+      <button
+        className="bg-gray-200 text-gray-700 text-sm rounded-xl px-2 ml-2"
+        type="submit"
+        name="intent"
+        value="delete"
+      >
         {feature.score}
-      </div>
-    </fetcher.Form>
+      </button>
+    </Form>
   );
 }

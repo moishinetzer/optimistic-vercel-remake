@@ -1,4 +1,4 @@
-# Welcome to Remix + Vite!
+# Welcome to Remix + Vite
 
 📖 See the [Remix docs](https://remix.run/docs) and the [Remix Vite docs](https://remix.run/docs/en/main/future/vite) for details on supported features.
 
@@ -22,6 +22,12 @@ Then run the app in production mode:
 
 ```sh
 npm start
+```
+
+Connect to redis fly:
+
+```sh
+fly redis connect
 ```
 
 Now you'll need to pick a host to deploy it to.

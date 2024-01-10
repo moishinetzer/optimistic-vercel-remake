@@ -1,18 +1,11 @@
-// import { kv } from '@vercel/kv'
-// import { saveEmail } from './actions'
 import { ActionFunctionArgs, json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
-import { kv } from "@vercel/kv";
+import { useFetchers, useLoaderData } from "@remix-run/react";
+import { db } from "~/utils/db.server";
 import {
   type Feature,
   FeatureList,
   NewFeatureForm,
 } from "~/components/feature-form";
-
-// export let metadata = {
-//   title: 'Next.js and Redis Example',
-//   description: 'Feature roadmap example with Next.js with Redis.',
-// }
 
 function VercelLogo(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -39,39 +32,42 @@ export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
   const intent = formData.get("intent");
 
-  if (intent === "feature") {
-    const feature = formData.get("feature");
+  if (intent === "feature" || intent === "upvote") {
+    const title = String(formData.get("title")!);
+    const id = String(formData.get("id")!);
+    const created_at = formData.has("created_at")
+      ? String(formData.get("created_at"))
+      : new Date().toISOString();
+    const score = formData.has("score") ? Number(formData.get("score")) + 1 : 0;
 
-    if (!feature) {
-      throw new Error("Missing feature");
-    }
-
-    const id = Math.random().toString(36).slice(2);
-    const score = "0";
-    const created_at = new Date().toISOString();
-
-    await kv.hset(`item:${id}`, {
-      id,
-      title: feature,
-      score,
-      created_at,
+    await db.feature.upsert({
+      where: {
+        id,
+      },
+      create: {
+        id,
+        title,
+        score,
+        created_at,
+      },
+      update: {
+        id,
+        title,
+        score,
+        created_at,
+      },
     });
-  } else if (intent === "upvote") {
-    const id = formData.get("id");
+  } else if (intent === "delete") {
+    const id = String(formData.get("id"));
 
     if (!id) {
       throw new Error("Missing id");
     }
 
-    const feature = await kv.hgetall<Feature>(`item:${id}`);
-
-    if (!feature) {
-      throw new Error("Feature not found");
-    }
-
-    await kv.hset(`item:${id}`, {
-      ...feature,
-      score: Number(feature.score) + 1,
+    await db.feature.delete({
+      where: {
+        id,
+      },
     });
   }
 
@@ -79,23 +75,84 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export async function loader() {
-  // Get all features
-  const featureKeys = await kv.keys("item:*");
-
-  const features = await Promise.all(
-    featureKeys.map(async (key) => {
-      const feature = await kv.hgetall<Feature>(key);
-      return feature!;
-    })
-  );
+  const features = await db.feature.findMany();
 
   return json({
-    features,
+    features: features ?? [],
   });
+}
+
+function usePendingItems(): {
+  pendingItems: Feature[];
+  deletedItems: {
+    id: string;
+  }[];
+} {
+  const fetchers = useFetchers();
+
+  const pendingItems = fetchers
+    .filter((fetcher) => {
+      const intent = String(fetcher.formData?.get("intent"));
+      return intent === "feature" || intent === "upvote";
+    })
+    .map((fetcher) => {
+      const id = String(fetcher.formData?.get("id"));
+      const title = String(fetcher.formData?.get("title"));
+      const created_at = String(fetcher.formData?.get("created_at"));
+
+      const intent = String(fetcher.formData?.get("intent"));
+      const score =
+        intent === "feature" ? 0 : Number(fetcher.formData?.get("score")) + 1;
+
+      return {
+        id,
+        title,
+        score,
+        created_at,
+        intent,
+      };
+    });
+
+  const deletedItems = fetchers
+    .filter((fetcher) => {
+      const intent = String(fetcher.formData?.get("intent"));
+      return intent === "delete";
+    })
+    .map((fetcher) => {
+      const id = String(fetcher.formData?.get("id"));
+
+      return {
+        id,
+      };
+    });
+
+  return {
+    pendingItems,
+    deletedItems,
+  };
 }
 
 export default function Page() {
   const { features } = useLoaderData<typeof loader>();
+
+  const featuresMap = new Map<string, Feature>();
+
+  // Add any pending new features to the list
+  const { pendingItems, deletedItems } = usePendingItems();
+
+  // Add all existing features to the list as long as they aren't pending deletion
+  for (const feature of features) {
+    if (!deletedItems.some((item) => item.id === feature.id)) {
+      featuresMap.set(feature.id, feature);
+    }
+  }
+
+  // Add any pending new features to the list
+  for (const feature of pendingItems) {
+    if (!deletedItems.some((item) => item.id === feature.id)) {
+      featuresMap.set(feature.id, feature);
+    }
+  }
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen py-2">
@@ -111,7 +168,7 @@ export default function Page() {
         </h2>
         <div className="flex flex-wrap items-center justify-around max-w-4xl my-8 sm:w-full bg-white rounded-md shadow-xl h-full border border-gray-100">
           <NewFeatureForm />
-          <FeatureList features={features} />
+          <FeatureList features={Array.from(featuresMap.values())} />
 
           <hr className="border-1 border-gray-200 my-8 mx-8 w-full" />
           <div className="mx-8 w-full">
