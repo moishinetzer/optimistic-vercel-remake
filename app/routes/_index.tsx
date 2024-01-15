@@ -1,11 +1,7 @@
 import { ActionFunctionArgs, json } from "@remix-run/node";
 import { useFetchers, useLoaderData } from "@remix-run/react";
 import { db } from "~/utils/db.server";
-import {
-  type Feature,
-  FeatureList,
-  NewFeatureForm,
-} from "~/components/feature-form";
+import { FeatureList, NewFeatureForm } from "~/components/feature-form";
 
 function VercelLogo(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -34,8 +30,9 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === "feature" || intent === "upvote") {
     const id = String(formData.get("id")!);
+
     if (!id) {
-      throw new Error("Missing id");
+      throw new Error("Missing id or upvoteId");
     }
 
     const title = String(formData.get("title"));
@@ -47,15 +44,24 @@ export async function action({ request }: ActionFunctionArgs) {
       create: {
         id,
         title,
-        score: 0,
-        created_at: new Date(),
       },
-      update: {
-        score: {
-          increment: 1,
-        },
-      },
+      update: {},
     });
+
+    if (intent === "upvote") {
+      const upvoteId = String(formData.get("upvoteId"!));
+
+      if (!upvoteId) {
+        throw new Error("Missing upvoteId");
+      }
+
+      await db.upvote.create({
+        data: {
+          featureId: id,
+          id: upvoteId,
+        },
+      });
+    }
   } else if (intent === "delete") {
     const id = String(formData.get("id"));
 
@@ -74,134 +80,67 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export async function loader() {
-  const features = await db.feature.findMany();
+  const features = await db.feature.findMany({
+    include: {
+      upvotes: true,
+    },
+    orderBy: {
+      created_at: "desc",
+    },
+  });
 
   return json({
     features: features ?? [],
   });
 }
 
-// Proposed optimistic model:
-
-// Create new feature -> FormData({
-//   intent: "feature",
-//   title: "My new feature",
-//   score: 0,
-//   id: "123",
-// })
-
-// Upvote feature that has been created -> FormData({
-//   intent: "upvote",
-//   id: "123",
-//   // Do not include the score, it will be incremented on the server
-// })
-
-// To see the current upvote count we can count the number of pending upvote fetchers
-// for a given feature id.
-// E.g. fetchers.filter(fetcher => fetcher.formData.get("id") === "123" && fetcher.formData.get("intent") === "upvote").length
-
-// Then on the client we add the pending upvote count to the feature score
-
-function usePendingItems(): {
-  pendingNewItems: Feature[];
-  pendingUpvoteItems: {
-    id: string;
-  }[];
-  pendingDeletedItems: {
-    id: string;
-  }[];
-} {
-  const fetchers = useFetchers();
-
-  const pendingNewItems = fetchers
-    .filter((fetcher) => {
-      const intent = String(fetcher.formData?.get("intent"));
-      return intent === "feature";
-    })
-    .map((fetcher) => {
-      const id = String(fetcher.formData?.get("id"));
-      const title = String(fetcher.formData?.get("title"));
-      const created_at = String(fetcher.formData?.get("created_at"));
-
-      return {
-        id,
-        title,
-        created_at,
-        // TODO: Remove score from the form data
-        score: 0,
-      };
-    });
-
-  const pendingUpvoteItems = fetchers
-    .filter((fetcher) => {
-      const intent = String(fetcher.formData?.get("intent"));
-      return intent === "upvote" && fetcher.state === "submitting";
-    })
-    .map((fetcher) => {
-      const id = String(fetcher.formData?.get("id"));
-
-      return {
-        id,
-      };
-    });
-
-  const pendingDeletedItems = fetchers
-    .filter((fetcher) => {
-      const intent = String(fetcher.formData?.get("intent"));
-      return intent === "delete";
-    })
-    .map((fetcher) => {
-      const id = String(fetcher.formData?.get("id"));
-
-      return {
-        id,
-      };
-    });
-
-  return {
-    pendingNewItems,
-    pendingUpvoteItems,
-    pendingDeletedItems,
-  };
-}
-
 export default function Page() {
   const { features } = useLoaderData<typeof loader>();
 
-  const featuresMap = new Map<string, Feature>();
+  const upvotesMap = new Map(
+    features.map((feature) => [
+      feature.id,
+      new Set(feature.upvotes.map((upvote) => upvote.id)),
+    ])
+  );
 
-  const { pendingDeletedItems, pendingNewItems, pendingUpvoteItems } =
-    usePendingItems();
+  const fetchers = useFetchers();
 
-  // First add all the existing features to the map so long as they don't have a pending delete
-  for (const feature of features) {
-    if (pendingDeletedItems.some((item) => item.id === feature.id)) continue;
-
-    const pendingUpvoteCount = pendingUpvoteItems.filter(
-      (item) => item.id === feature.id
-    ).length;
-
-    featuresMap.set(feature.id, {
-      ...feature,
-      score: feature.score + pendingUpvoteCount,
+  fetchers
+    .filter((fetcher) => fetcher!.formData!.get("intent") === "upvote")
+    .forEach((fetcher) => {
+      const featureId = String(fetcher!.formData!.get("id"));
+      const upvoteId = String(fetcher!.formData!.get("upvoteId"));
+      const upvotes = upvotesMap.get(featureId) || new Set();
+      upvotes.add(upvoteId);
+      upvotesMap.set(featureId, upvotes);
     });
-  }
 
-  // Do the same for the pending new items - they might also have pending upvotes
-  for (const feature of pendingNewItems) {
-    const pendingUpvoteCount = pendingUpvoteItems.filter(
-      (item) => item.id === feature.id
-    ).length;
+  const pendingNewFeatures = fetchers
+    .filter((fetcher) => fetcher!.formData!.get("intent") === "feature")
+    .map((fetcher) => ({
+      id: String(fetcher!.formData!.get("id")),
+      title: String(fetcher!.formData!.get("title")),
+      created_at: new Date().toISOString(),
+      upvotes: [],
+    }));
 
-    featuresMap.set(feature.id, {
-      ...feature,
-      score: feature.score + pendingUpvoteCount,
-    });
-  }
+  const pendingDeletions = fetchers
+    .filter((fetcher) => fetcher!.formData!.get("intent") === "delete")
+    .map((fetcher) => String(fetcher!.formData!.get("id")));
+
+  const featuresMap = new Map(
+    features
+      // Add new features
+      .concat(pendingNewFeatures)
+      .filter((feature) => !pendingDeletions.includes(feature.id))
+      .map((feature) => [
+        feature.id,
+        { ...feature, upvotes: upvotesMap.get(feature.id)?.size ?? 0 },
+      ])
+  );
 
   return (
-    // Markup for the page
-    // ...
     <div className="flex flex-col items-center justify-center min-h-screen py-2">
       <main className="flex flex-col items-center justify-center flex-1 px-4 sm:px-20 text-center">
         <div className="flex justify-center items-center bg-black rounded-full w-16 sm:w-24 h-16 sm:h-24 my-8">

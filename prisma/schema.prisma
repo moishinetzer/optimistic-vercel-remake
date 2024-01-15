@@ -13,6 +13,13 @@ datasource db {
 model Feature {
   id         String   @id @default(uuid())
   title      String
-  score      Int
+  upvotes    Upvote[]
+  created_at DateTime @default(now())
+}
+
+model Upvote {
+  id         String   @id @default(uuid())
+  feature    Feature  @relation(fields: [featureId], references: [id], onDelete: Cascade)
+  featureId  String
   created_at DateTime @default(now())
 }

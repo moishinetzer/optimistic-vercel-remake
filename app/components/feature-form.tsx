@@ -44,15 +44,15 @@ export function NewFeatureForm() {
 export type Feature = {
   id: string;
   title: string;
-  score: number;
+  upvotes: number;
   created_at: string;
 };
 
 export function FeatureList({ features }: { features: Feature[] }) {
   const sortedFeatures = features.sort((a, b) => {
     // First, compare by score in descending order
-    if (a.score > b.score) return -1;
-    if (a.score < b.score) return 1;
+    if (a.upvotes > b.upvotes) return -1;
+    if (a.upvotes < b.upvotes) return 1;
 
     // If scores are equal, then sort by created_at i n ascending order
     return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
@@ -83,6 +83,8 @@ export function Item({
   isLast: boolean;
   feature: Feature;
 }) {
+  const upvoteId = Math.random().toString(36).slice(2);
+
   return (
     <Form
       navigate={false}
@@ -104,7 +106,10 @@ export function Item({
       >
         👍
       </button>
+
       <input type="hidden" name="id" value={feature.id} />
+      <input type="hidden" name="upvoteId" value={upvoteId} />
+
       <h3 className="text font-semibold w-full text-left">{feature.title}</h3>
 
       <button
@@ -113,7 +118,7 @@ export function Item({
         name="intent"
         value="delete"
       >
-        {feature.score}
+        {feature.upvotes}
       </button>
     </Form>
   );
